@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Grid Glider – Neon Casual Game</title>
+  <style>
+    body { margin: 0; background: #000; overflow: hidden; }  /* Black background, no scroll */
+    #score { position: absolute; top: 10px; left: 10px;
+             font: bold 18px sans-serif; color: #00FF00; }
+    #gameOver { position: absolute; top: 50%; left: 50%;
+                transform: translate(-50%, -50%);
+                font: bold 24px sans-serif; color: #FF3366;
+                display: none; }
+  </style>
+  <!-- Include Three.js library from CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.174.0/build/three.min.js"></script>
+</head>
+<body>
+  <div id="score">Score: 0</div>
+  <div id="gameOver">Game Over! Press R to Restart</div>
+  <script>
+  // ----- Initialize Three.js scene, camera, renderer -----
+  const scene = new THREE.Scene();
+  // Camera: perspective (FOV 75°, aspect to window, near 0.1, far 200)
+  const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 200);
+  camera.position.set(0, 5, -20);              // position camera slightly above and behind the player
+  camera.lookAt(new THREE.Vector3(0, 0, 10));  // look toward the forward direction (down the Z axis)
+
+  const renderer = new THREE.WebGLRenderer();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(window.devicePixelRatio);
+  document.body.appendChild(renderer.domElement);
+
+  // Lighting (optional): using a dim ambient light so neon colors show without dark shading
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.2);
+  scene.add(ambientLight);
+  // A subtle point light to make neon materials pop (could be omitted if using MeshBasicMaterial)
+  const pointLight = new THREE.PointLight(0xffffff, 0.8);
+  pointLight.position.set(0, 50, -20);
+  scene.add(pointLight);
+
+  // ----- Create player object -----
+  const playerRadius = 1;
+  const playerGeometry = new THREE.SphereGeometry(playerRadius, 16, 16);
+  // Use an emissive neon material for glow effect
+  const playerMaterial = new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 0.5 });
+  const player = new THREE.Mesh(playerGeometry, playerMaterial);
+  player.position.set(0, 0, 0);  // start at origin
+  scene.add(player);
+
+  // ----- Create ground grid (neon grid lines) -----
+  const gridSize = 200, gridDivisions = 20;
+  const gridHelper = new THREE.GridHelper(gridSize, gridDivisions, 0x00ff00, 0x00ff00);
+  gridHelper.position.y = -1;              // slightly below the player so it doesn't intersect
+  gridHelper.material.opacity = 0.3;
+  gridHelper.material.transparent = true;  // make the grid semi-transparent
+  scene.add(gridHelper);
+
+  // ----- Obstacles setup -----
+  const obstacleGeometry = new THREE.BoxGeometry(2, 2, 2);
+  const obstacleMaterial = new THREE.MeshStandardMaterial({ color: 0xff3377, emissive: 0xff3377, emissiveIntensity: 0.5 });
+  let obstacles = [];  // array to hold active obstacles
+
+  // Difficulty and timing variables
+  let baseSpeed = 0.2;
+  let speedIncrement = 0.02;       // speed increase per second
+  let obstacleSpawnInterval = 1500; // initial spawn interval in milliseconds
+  let minSpawnInterval = 500;      // floor for spawn interval (fastest spawn rate)
+  let spawnReductionRate = 10;     // spawn interval reduction (ms per second of gameplay)
+  let lastSpawnTime = performance.now();
+  let startTime = performance.now();
+  let gameOver = false;
+  let score = 0;
+
+  // Movement controls
+  let moveLeft = false, moveRight = false;
+  const playerSpeed = 0.5;  // horizontal movement speed
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
+      moveLeft = true;
+      e.preventDefault();
+    }
+    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
+      moveRight = true;
+      e.preventDefault();
+    }
+    // Restart on 'R' if game over
+    if (gameOver && (e.key === 'r' || e.key === 'R')) {
+      resetGame();
+    }
+  });
+  window.addEventListener('keyup', (e) => {
+    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') moveLeft = false;
+    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') moveRight = false;
+  });
+
+  // Limit player movement within bounds (to keep in camera view)
+  const maxX = 10;
+  function updatePlayerPosition() {
+    if (moveLeft) {
+      player.position.x -= playerSpeed;
+      if (player.position.x < -maxX) player.position.x = -maxX;
+    }
+    if (moveRight) {
+      player.position.x += playerSpeed;
+      if (player.position.x > maxX) player.position.x = maxX;
+    }
+  }
+
+  // Spawn a new obstacle at a random X position ahead of the player
+  function spawnObstacle() {
+    const obstacle = new THREE.Mesh(obstacleGeometry, obstacleMaterial);
+    // Random X within ±10, same Y as player, start at Z = 100 (far ahead)
+    obstacle.position.set((Math.random() * 20 - 10), 0, 100);
+    scene.add(obstacle);
+    obstacles.push(obstacle);
+  }
+
+  // Reset game state for restart
+  function resetGame() {
+    // Remove existing obstacles from scene
+    obstacles.forEach(obs => scene.remove(obs));
+    obstacles = [];
+    // Reset player position and score
+    player.position.x = 0;
+    score = 0;
+    document.getElementById('score').innerText = "Score: 0";
+    // Reset timing and difficulty
+    startTime = performance.now();
+    lastSpawnTime = performance.now();
+    baseSpeed = 0.2;
+    obstacleSpawnInterval = 1500;
+    gameOver = false;
+    document.getElementById('gameOver').style.display = 'none';
+  }
+
+  // ----- Animation loop -----
+  function animate() {
+    requestAnimationFrame(animate);
+    if (gameOver) {
+      renderer.render(scene, camera);
+      return;  // freeze game updates if game over
+    }
+
+    // Calculate elapsed time for difficulty scaling
+    const currentTime = performance.now();
+    const elapsedTime = (currentTime - startTime) / 1000;  // in seconds
+
+    // Increase obstacle speed over time
+    const currentSpeed = baseSpeed + speedIncrement * elapsedTime;
+
+    // Spawn new obstacles at interval, with interval shrinking over time (to a minimum)
+    if (currentTime - lastSpawnTime > obstacleSpawnInterval) {
+      spawnObstacle();
+      lastSpawnTime = currentTime;
+      // Decrease spawn interval gradually, but not below minSpawnInterval
+      obstacleSpawnInterval = Math.max(minSpawnInterval, 1500 - spawnReductionRate * elapsedTime * 1000 / 1000);
+      // ^ reduces ~10 ms per second of gameplay
+    }
+
+    // Move obstacles towards the camera (decreasing Z)
+    for (let i = 0; i < obstacles.length; i++) {
+      const obs = obstacles[i];
+      obs.position.z -= currentSpeed;
+      // Remove obstacles that passed behind the camera
+      if (obs.position.z < camera.position.z - 10) {
+        scene.remove(obs);
+        obstacles.splice(i, 1);
+        i--;
+      }
+    }
+
+    // Update player position based on input
+    updatePlayerPosition();
+
+    // Collision detection: check if any obstacle is very close to player's position
+    for (let obs of obstacles) {
+      if (Math.abs(obs.position.z - player.position.z) < 1.5) {  // near the player in Z
+        if (Math.abs(obs.position.x - player.position.x) < 2) {  // overlaps in X
+          // Collision detected - end game
+          gameOver = true;
+          document.getElementById('gameOver').style.display = 'block';
+        }
+      }
+    }
+
+    // Update score (e.g., use elapsed time as score for simplicity)
+    score = Math.floor(elapsedTime * 100);  // score could be 100 points per second
+    document.getElementById('score').innerText = "Score: " + score;
+
+    // Render the scene
+    renderer.render(scene, camera);
+  }
+  animate();
+
+  // Handle window resize
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+  </script>
+</body>
+</html>
