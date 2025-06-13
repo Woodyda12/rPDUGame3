@@ -1,0 +1,13 @@
+/public
+  index.html
+  game.js            ← boot / global config
+  /scenes
+    Room.js          ← main click-around view
+    Puzzle1-6.js     ← close-up views
+  /objects
+    Inventory.js
+    Item.js
+  /assets
+    img/             ← art
+    sfx/             ← optional
+README.md
